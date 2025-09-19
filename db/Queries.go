@@ -97,4 +97,57 @@ RETURN communityId, labels(node)[0] AS label, node.id AS node_id
 ORDER BY communityId, label, node_id
 
 	`
+
+  QueryBlastRadius = `
+    // Step 1: Resolve starting node with dynamic label
+    CALL apoc.cypher.run(
+      '
+      MATCH (start:`' + $label + '` {id: $id})
+      MATCH p = (start)-[*1..$hop_length]-(m)
+      RETURN collect(DISTINCT nodes(p)) AS nodePaths,
+            collect(DISTINCT relationships(p)) AS relPaths
+      ',
+      {id: $id, label: $label, hop_length: $hop_length}
+    ) YIELD value
+    WITH value.nodePaths AS nodePaths, value.relPaths AS relPaths
+    UNWIND nodePaths AS np
+    UNWIND np AS node
+    WITH collect(DISTINCT node) AS nodes, relPaths
+
+    UNWIND relPaths AS rp
+    UNWIND rp AS rel
+    WITH nodes, collect(DISTINCT rel) AS relationships
+
+    // Step 2: Drop old projection
+    CALL gds.graph.exists('subgraph') YIELD exists
+    WITH nodes, relationships, exists
+    CALL apoc.do.when(
+      exists,
+      'CALL gds.graph.drop("subgraph") YIELD graphName RETURN graphName',
+      'RETURN null AS graphName',
+      {}
+    ) YIELD value
+    WITH nodes, relationships
+
+    // Step 3: Create new projection
+    CALL gds.graph.project.cypher(
+      'subgraph',
+      'UNWIND $nodes AS n RETURN id(n) AS id',
+      '
+        UNWIND $rels AS r
+        RETURN id(startNode(r)) AS source, id(endNode(r)) AS target, type(r) AS type
+      ',
+      { parameters: { nodes: nodes, rels: relationships } }
+    )
+    YIELD graphName
+
+    // Step 4: Return nodes + relationships
+    UNWIND nodes AS n
+    OPTIONAL MATCH (n)-[r]->(m)
+    WHERE r IN relationships
+RETURN 
+  collect(DISTINCT {id: id(n), label: head(labels(n))}) AS nodes,
+  collect(DISTINCT {source: id(startNode(r)), target: id(endNode(r)), type: type(r)}) AS rels
+
+  `
 )

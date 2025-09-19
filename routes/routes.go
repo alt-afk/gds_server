@@ -1,19 +1,41 @@
 package routes
 
 import (
-	"sample_server/db"
 	"fmt"
 	"net/http"
+	"sample_server/db"
+
 	"github.com/gin-gonic/gin"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
 func RegisterRoutes(r *gin.Engine) {
-	gdsGroup := r.Group("/gds")
+	gdsGroupOld := r.Group("/gds")
 	{
-		gdsGroup.GET("/louvian/:id/:hop_length", getLouvianCluster)
-		gdsGroup.GET("/labelprop/:id/:hop_length", getLabelpropCluster)
+		gdsGroupOld.GET("/louvian/:id/:hop_length", getLouvianCluster)
+		gdsGroupOld.GET("/labelprop/:id/:hop_length", getLabelpropCluster)
 	}
+
+	gdsGroupNew := r.Group("/gds/v2")
+	{
+		gdsGroupNew.GET("/:algo", func(c *gin.Context) {
+			algo := c.Param("algo")
+
+			switch algo {
+			case "louvain":
+				getLouvianCommunities(c)
+			case "labelprop":
+				getLabelpropCluster(c)
+			default:
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": fmt.Sprintf("unsupported algorithm: %s", algo),
+				})
+			}
+		})
+	}
+
+	r.GET("/blastrad/:label/:id/:hop_length", getBlastRadius)
+
 	r.DELETE("/reset", resetDatabase)
 }
 
@@ -35,11 +57,10 @@ func resetDatabase(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "Database reset successful"})
 }
 
-
 func getLouvianCluster(c *gin.Context) {
 	session := db.Driver.NewSession(c, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(c)
-	
+
 	// label := c.Param("label")
 	id := c.Param("id")
 	hop := c.Param("hop_length")
@@ -65,8 +86,8 @@ func getLouvianCluster(c *gin.Context) {
 			id := record.Values[2]
 
 			nodeInfo := map[string]interface{}{
-				"label": label,
-				"node_id":    id,
+				"label":   label,
+				"node_id": id,
 			}
 
 			clusters[communityID] = append(clusters[communityID], nodeInfo)
@@ -84,11 +105,10 @@ func getLouvianCluster(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"clusters": result})
 }
 
-
 func getLabelpropCluster(c *gin.Context) {
-		session := db.Driver.NewSession(c, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	session := db.Driver.NewSession(c, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(c)
-	
+
 	// label := c.Param("label")
 	id := c.Param("id")
 	hop := c.Param("hop_length")
@@ -114,8 +134,8 @@ func getLabelpropCluster(c *gin.Context) {
 			id := record.Values[2]
 
 			nodeInfo := map[string]interface{}{
-				"label": label,
-				"node_id":    id,
+				"label":   label,
+				"node_id": id,
 			}
 
 			clusters[communityID] = append(clusters[communityID], nodeInfo)
